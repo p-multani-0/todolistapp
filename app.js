@@ -4,44 +4,35 @@ const path = require("path");
 const cookieParser = require("cookie-parser");
 const logger = require("morgan");
 const cors = require("cors");
-const passport = require("./src/auth/index");
+const passport = require("passport");
 const session = require("express-session");
-const MongoStore = require("connect-mongo");
+const connectRedis = require("connect-redis");
+const { createClient } = require("redis");
 
 require("dotenv").config();
-const { CLIENT_ORIGIN, JWT_SECRET } = process.env;
+const { CLIENT_ORIGIN, SESSION_SECRET } = process.env;
 
-const { mongoose, mongoUrl } = require("./src/configs/db.config");
-
-const authRouter = require("./src/routes/auth");
+const indexRouter = require("./src/routes/index");
 const usersRouter = require("./src/routes/users");
 const todosRouter = require("./src/routes/todos");
 
 const server = express();
+
+const redisClient = createClient({ legacyMode: true });
+redisClient.connect().catch(console.error);
+const RedisStore = connectRedis(session);
 
 server.use(logger("dev"));
 server.use(express.json());
 server.use(express.urlencoded({ extended: true }));
 server.use(cookieParser());
 server.use(express.static(path.join(__dirname, "public")));
-server.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "DELETE", "UPDATE", "PUT"],
-  })
-);
+server.use(cors({ origin: CLIENT_ORIGIN }));
 
 server.use(
   session({
-    store: new MongoStore({
-      mongoUrl: mongoUrl,
-      dbName: process.env.DB_NAME,
-      collectionName: "sessions",
-      stringify: false,
-      autoRemove: "interval",
-      autoRemoveInterval: 1,
-    }),
-    secret: JWT_SECRET,
+    store: new RedisStore({ client: redisClient }),
+    secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -51,11 +42,10 @@ server.use(
     },
   })
 );
-
 server.use(passport.initialize());
 server.use(passport.session());
 
-server.use("/", authRouter);
+server.use("/", indexRouter);
 server.use("/users", usersRouter);
 server.use("/todos", todosRouter);
 
@@ -72,7 +62,7 @@ server.use(function (err, req, res, next) {
 
   // render the error page
   res.status(err.status || 500);
-  res.json({ message: err.message });
+  res.render("error");
 });
 
 module.exports = server;
